@@ -1,0 +1,146 @@
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64  // Changed for 0.96" OLED
+#define OLED_RESET -1
+#define SCREEN_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+int analogInput = A0;
+float vout = 0.0;
+float vin = 0.0;
+float R1 = 10000.0; // 10K
+float R2 = 3100.0;  // 2.2K
+int value = 0;
+int mode = 0;
+int raw = 0;
+float buffer = 0;
+float Vout = 0;
+int Vin = 5;
+float R11 = 1000.0; // 1K fixed resistor
+float R22 = 0;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(analogInput, INPUT);
+  pinMode(9, OUTPUT);        // buzzer
+  pinMode(7, INPUT_PULLUP);  // mode switch
+  digitalWrite(9, HIGH);
+  delay(40);
+  digitalWrite(9, LOW);
+  pinMode(13, OUTPUT);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    while (true);
+  }
+  display.display();
+  delay(1000);
+  display.clearDisplay();
+}
+
+void loop() {
+  if (digitalRead(7) == LOW) {
+    delay(200);
+    mode++;
+    if (mode > 3) mode = 0;
+  }
+
+  switch (mode) {
+    case 0: // Voltmeter
+      value = analogRead(A0);
+      vout = (value * 5.0) / 1024.0;
+      vin = vout / (R2 / (R1 + R2));
+      if (vin < 0.09) vin = 0.0;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Voltmeter Mode");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(vin, 2);
+      display.print(" V");
+      display.display();
+      break;
+
+    case 1: // Diode / LED Test
+      value = analogRead(A2);
+      vout = (value * 5.0) / 1024.0;
+      vout = 5 - vout;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Diode/LED Test");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(vout, 2);
+      display.print(" V");
+      display.display();
+      break;
+
+    case 2: // Ohm Meter
+      raw = analogRead(A2);
+      buffer = raw * Vin;
+      Vout = buffer / 1024.0;
+      buffer = (Vin / Vout) - 1;
+      R22 = R11 * buffer;
+
+      Serial.print("Vout: ");
+      Serial.print(Vout);
+      Serial.print(" R2: ");
+      Serial.println(R22);
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("OHM Meter Mode");
+      display.setTextSize(2);
+      if (R22 < 1000) {
+        display.setCursor(10, 30);
+        display.print(R22, 0);
+        display.print(" OHM");
+      } else {
+        display.setCursor(10, 30);
+        display.print(R22 / 1000, 2);
+        display.print(" K");
+      }
+      display.display();
+      break;
+
+    case 3: // Continuity Test
+      raw = analogRead(A2);
+      buffer = raw * Vin;
+      Vout = buffer / 1024.0;
+      buffer = (Vin / Vout) - 1;
+      R22 = R11 * buffer;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Continuity Mode");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(R22, 0);
+      display.print(" OHM");
+      display.display();
+
+      if (R22 < 100) {
+        digitalWrite(9, HIGH);
+        delay(100);
+        digitalWrite(9, LOW);
+      }
+      break;
+  }
+
+  delay(300);
+}
