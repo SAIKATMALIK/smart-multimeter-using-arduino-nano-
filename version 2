@@ -1,0 +1,199 @@
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64  // For 0.96" OLED
+#define OLED_RESET -1
+#define SCREEN_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+int analogInput = A0;
+float vout = 0.0;
+float vin = 0.0;
+float R1 = 10000.0; // 10K
+float R2 = 3100.0;  // 3.1K (check your comment)
+int value = 0;
+int mode = 0;
+int raw = 0;
+float buffer = 0;
+float Vout = 0;
+int Vin = 5;
+float R11 = 1000.0; // 1K fixed resistor
+float R22 = 0;
+
+// ACS712 Setup
+const int ACS_PIN = A3; // Connect ACS712 to A2
+float zeroCurrentVoltage = 0.0;  // Calibration zero point
+const float ACS_SENSITIVITY = 0.300; // Sensitivity for ACS712 5A version (adjust if using 20A/30A)
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(analogInput, INPUT);
+  pinMode(9, OUTPUT);        // buzzer
+  pinMode(7, INPUT_PULLUP);  // mode switch
+  digitalWrite(9, HIGH);
+  delay(40);
+  digitalWrite(9, LOW);
+  pinMode(13, OUTPUT);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    while (true);
+  }
+
+  display.display();
+  delay(1000);
+  display.clearDisplay();
+
+  // === ACS712 Calibration ===
+  Serial.println("Calibrating ACS712...");
+  zeroCurrentVoltage = calibrateACS712(ACS_PIN);
+  Serial.print("✅ ACS712 Zero Voltage: ");
+  Serial.println(zeroCurrentVoltage, 3);
+}
+
+// === ACS712 Calibration Function ===
+float calibrateACS712(int pin) {
+  long sum = 0;
+  const int samples = 500;
+  for (int i = 0; i < samples; i++) {
+    sum += analogRead(pin);
+    delay(2);
+  }
+  float avg = sum / (float)samples;
+  // Convert to voltage (5V reference)
+  float voltage = avg * (5.0 / 1023.0);
+  return voltage;
+}
+
+// === ACS712 Current Reading ===
+float readACCurrent(int pin, float zeroV) {
+  const int samples = 200;
+  float sumSq = 0.0;
+  for (int i = 0; i < samples; i++) {
+    float voltage = analogRead(pin) * (5.0 / 1023.0);
+    float current = (voltage - zeroV) / ACS_SENSITIVITY; // I = (V - V0) / sensitivity
+    sumSq += current * current;
+    delay(2);
+  }
+  return sqrt(sumSq / samples); // RMS current
+}
+
+void loop() {
+  if (digitalRead(7) == LOW) {
+    delay(200);
+    mode++;
+    if (mode > 4) mode = 0;
+  }
+
+  switch (mode) {
+    case 0: // Voltmeter
+      value = analogRead(A0);
+      vout = (value * 5.0) / 1023.0;
+      vin = vout / (R2 / (R1 + R2));
+      if (vin < 0.09) vin = 0.0;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Voltmeter Mode");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(vin, 2);
+      display.print(" V");
+      display.display();
+      break;
+
+    case 1: // Diode / LED Test
+      value = analogRead(A2);
+      vout = (value * 5.0) / 1023.0;
+      vout = 5 - vout;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Diode/LED Test");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(vout, 2);
+      display.print(" V");
+      display.display();
+      break;
+
+    case 2: // Ohm Meter
+      raw = analogRead(A2);
+      buffer = raw * Vin;
+      Vout = buffer / 1023.0;
+      buffer = (Vin / Vout) - 1;
+      R22 = R11 * buffer;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("OHM Meter Mode");
+      display.setTextSize(2);
+      if (R22 < 1000) {
+        display.setCursor(10, 30);
+        display.print(R22, 0);
+        display.print(" OHM");
+      } else {
+        display.setCursor(10, 30);
+        display.print(R22 / 1000, 2);
+        display.print(" K");
+      }
+      display.display();
+      break;
+
+    case 3: // Continuity Test
+      raw = analogRead(A2);
+      buffer = raw * Vin;
+      Vout = buffer / 1023.0;
+      buffer = (Vin / Vout) - 1;
+      R22 = R11 * buffer;
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Continuity Mode");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(R22, 0);
+      display.print(" OHM");
+      display.display();
+
+      if (R22 < 100) {
+        digitalWrite(9, HIGH);
+        delay(100);
+        digitalWrite(9, LOW);
+      }
+      break;
+
+    case 4: // Current Measure Mode (ACS712)
+      float current = readACCurrent(ACS_PIN, zeroCurrentVoltage);
+
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println("Current Meter Mode");
+      display.setTextSize(2);
+      display.setCursor(10, 30);
+      display.print(current, 2);
+      display.print(" A");
+      display.display();
+
+      Serial.print("AC Current: ");
+      Serial.print(current, 3);
+      Serial.println(" A");
+      break;
+  }
+
+  delay(300);
+}
