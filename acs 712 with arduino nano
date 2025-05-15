@@ -1,0 +1,56 @@
+const float SENSITIVITY = 0.100; // 100mV per Amp for ACS712-20A
+const float NANO_ADC_REF = 5.0;  // ADC reference voltage
+const int ADC_MAX = 1023;
+
+const int ACS_PIN = A3;
+
+float ACS_PINOffsetV = 0;
+
+const int SAMPLES = 100;
+const float NOISE_FLOOR = 0.020; // 20mA noise floor
+const float CORRECTION_FACTOR = 1.0; // Optional fine-tuning
+
+void setup() {
+  Serial.begin(9600);
+  delay(1000); // Wait for serial monitor
+  calibrateSensor();
+  Serial.println("Calibration done. Starting current measurement...");
+}
+
+void loop() {
+  float current = getRMSCurrent();
+
+  // Apply threshold check
+  if (current < 0.1) {
+    current = 0.0;
+  }
+
+  Serial.print("Current: ");
+  Serial.print(current, 2); // 2 decimal places for cleaner look
+  Serial.println(" A");
+
+  delay(1000);
+}
+
+
+void calibrateSensor() {
+  long sum = 0;
+  const int CAL_SAMPLES = 300;
+  for (int i = 0; i < CAL_SAMPLES; i++) {
+    sum += analogRead(ACS_PIN);
+    delay(1);
+  }
+  ACS_PINOffsetV = (sum / (float)CAL_SAMPLES) * (NANO_ADC_REF / ADC_MAX);
+}
+
+float getRMSCurrent() {
+  float sumSq = 0;
+  for (int i = 0; i < SAMPLES; i++) {
+    float voltage = analogRead(ACS_PIN) * (NANO_ADC_REF / ADC_MAX);
+    float current = (voltage - ACS_PINOffsetV) / SENSITIVITY;
+    sumSq += current * current;
+    delayMicroseconds(100);
+  }
+  float rms = sqrt(sumSq / SAMPLES);
+  return (rms > NOISE_FLOOR) ? rms * CORRECTION_FACTOR : 0.0;
+}
